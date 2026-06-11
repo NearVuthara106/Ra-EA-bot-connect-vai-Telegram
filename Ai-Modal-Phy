@@ -1,0 +1,120 @@
+import numpy as np
+import pandas as pd
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.preprocessing import StandardScaler
+import warnings
+warnings.filterwarnings('ignore')
+
+class RaSodaAI:
+    def __init__(self):
+        self.model = RandomForestClassifier(n_estimators=100, random_state=42)
+        self.scaler = StandardScaler()
+        self.is_trained = False
+    
+    def create_features(self, data):
+        """Create technical features for AI to learn from"""
+        df = data.copy()
+        
+        # Price-based features
+        df['returns'] = df['Close'].pct_change()
+        df['high_low_ratio'] = df['High'] / df['Low']
+        df['close_open_ratio'] = df['Close'] / df['Open']
+        
+        # Moving averages
+        df['sma_5'] = df['Close'].rolling(5).mean()
+        df['sma_10'] = df['Close'].rolling(10).mean()
+        df['sma_20'] = df['Close'].rolling(20).mean()
+        df['ema_12'] = df['Close'].ewm(span=12).mean()
+        df['ema_26'] = df['Close'].ewm(span=26).mean()
+        
+        # RSI
+        delta = df['Close'].diff()
+        gain = delta.where(delta > 0, 0).rolling(14).mean()
+        loss = (-delta.where(delta < 0, 0)).rolling(14).mean()
+        rs = gain / loss
+        df['rsi'] = 100 - (100 / (1 + rs))
+        
+        # MACD
+        df['macd'] = df['ema_12'] - df['ema_26']
+        df['macd_signal'] = df['macd'].ewm(span=9).mean()
+        
+        # Volatility
+        df['volatility'] = df['returns'].rolling(20).std()
+        
+        # Target: 1 if price goes UP in next 5 periods, 0 if DOWN
+        df['future_return'] = df['Close'].shift(-5) / df['Close'] - 1
+        df['target'] = (df['future_return'] > 0).astype(int)
+        
+        return df
+    
+    def train(self, data):
+        """Train the AI model on historical data"""
+        print("🤖 Training RaSoda AI on XAUUSD data...")
+        
+        df = self.create_features(data)
+        
+        # Feature columns for AI
+        feature_cols = ['returns', 'high_low_ratio', 'close_open_ratio', 
+                       'sma_5', 'sma_10', 'sma_20', 'rsi', 'macd', 
+                       'macd_signal', 'volatility']
+        
+        # Remove NaN values
+        df_clean = df.dropna()
+        
+        if len(df_clean) < 100:
+            print("⚠️ Not enough data to train AI. Need at least 100 candles.")
+            return False
+        
+        X = df_clean[feature_cols]
+        y = df_clean['target']
+        
+        # Scale features
+        X_scaled = self.scaler.fit_transform(X)
+        
+        # Train model
+        self.model.fit(X_scaled, y)
+        self.is_trained = True
+        
+        accuracy = self.model.score(X_scaled, y)
+        print(f"✅ AI Training Complete! Accuracy: {accuracy:.2%}")
+        return True
+    
+    def predict(self, data):
+        """Make a prediction for the next move"""
+        if not self.is_trained:
+            return {"signal": "NEUTRAL", "confidence": 0, "direction": "⚠️ AI Not Trained"}
+        
+        df = self.create_features(data)
+        feature_cols = ['returns', 'high_low_ratio', 'close_open_ratio', 
+                       'sma_5', 'sma_10', 'sma_20', 'rsi', 'macd', 
+                       'macd_signal', 'volatility']
+        
+        # Get latest data
+        latest = df[feature_cols].iloc[-1:].dropna()
+        
+        if len(latest) == 0:
+            return {"signal": "NEUTRAL", "confidence": 0, "direction": "⚠️ Insufficient Data"}
+        
+        X_latest = self.scaler.transform(latest)
+        
+        # Get prediction and probability
+        pred = self.model.predict(X_latest)[0]
+        proba = self.model.predict_proba(X_latest)[0]
+        confidence = max(proba) * 100
+        
+        if pred == 1:
+            signal = "BUY 🟢"
+            direction = "📈 AI Predicts UP"
+        else:
+            signal = "SELL 🔴"
+            direction = "📉 AI Predicts DOWN"
+        
+        return {
+            "signal": signal,
+            "confidence": confidence,
+            "direction": direction,
+            "raw_prediction": pred
+        }
+
+# Create global AI instance
+ra_soda_ai = RaSodaAI()
