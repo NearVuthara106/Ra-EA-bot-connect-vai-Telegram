@@ -1,0 +1,8 @@
+# ទាញយក script ដំឡើង pip
+curl https://bootstrap.pypa.io/get-pip.py -o get-pip.py
+
+# រត់ script
+python get-pip.py
+
+# រួចដំឡើងកញ្ចប់
+pip install -r requirements.txt
