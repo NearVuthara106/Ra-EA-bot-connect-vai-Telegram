@@ -1,0 +1,116 @@
+import yfinance as yf
+import pandas as pd
+from datetime import datetime, timedelta
+
+def get_live_xauusd(period='1d', interval='5m'):
+    """
+    Get live XAUUSD data
+    period: 1d, 5d, 1mo, 3mo, 6mo, 1y
+    interval: 1m, 2m, 5m, 15m, 30m, 60m, 1h, 1d
+    """
+    try:
+        # XAUUSD = GOLD (GLD ETF is proxy, but we adjust)
+        ticker = yf.Ticker("GC=F")  # Gold Futures
+        data = ticker.history(period=period, interval=interval)
+        
+        if data.empty:
+            # Fallback to GLD ETF
+            ticker = yf.Ticker("GLD")
+            data = ticker.history(period=period, interval=interval)
+        
+        return data
+    except Exception as e:
+        print(f"Error fetching data: {e}")
+        return pd.DataFrame()
+
+def get_current_price():
+    """Get current XAUUSD spot price"""
+    try:
+        # Try multiple sources
+        ticker = yf.Ticker("GC=F")
+        data = ticker.history(period='1d', interval='1m')
+        
+        if not data.empty:
+            return data['Close'].iloc[-1]
+        
+        # Fallback
+        ticker = yf.Ticker("GLD")
+        data = ticker.history(period='1d', interval='1m')
+        if not data.empty:
+            return data['Close'].iloc[-1] * 18.5  # Approximate conversion
+        
+        return None
+    except:
+        return None
+
+def calculate_technical_indicators(data):
+    """Calculate real-time technical indicators"""
+    df = data.copy()
+    
+    # RSI
+    delta = df['Close'].diff()
+    gain = delta.where(delta > 0, 0).rolling(14).mean()
+    loss = (-delta.where(delta < 0, 0)).rolling(14).mean()
+    rs = gain / loss
+    df['RSI'] = 100 - (100 / (1 + rs))
+    
+    # Moving Averages
+    df['SMA_20'] = df['Close'].rolling(20).mean()
+    df['SMA_50'] = df['Close'].rolling(50).mean()
+    df['EMA_12'] = df['Close'].ewm(span=12).mean()
+    df['EMA_26'] = df['Close'].ewm(span=26).mean()
+    
+    # MACD
+    df['MACD'] = df['EMA_12'] - df['EMA_26']
+    df['MACD_Signal'] = df['MACD'].ewm(span=9).mean()
+    df['MACD_Histogram'] = df['MACD'] - df['MACD_Signal']
+    
+    return df
+
+def get_trading_signal(data):
+    """Generate trading signal based on indicators + AI"""
+    df = calculate_technical_indicators(data)
+    latest = df.iloc[-1]
+    
+    signals = []
+    
+    # RSI Signal
+    if latest['RSI'] > 70:
+        signals.append(('RSI', 'OVERSOLD 🔴', -1))
+    elif latest['RSI'] < 30:
+        signals.append(('RSI', 'OVERSOLD 🟢', 1))
+    
+    # MACD Signal
+    if latest['MACD'] > latest['MACD_Signal']:
+        signals.append(('MACD', 'BULLISH 🟢', 1))
+    else:
+        signals.append(('MACD', 'BEARISH 🔴', -1))
+    
+    # MA Trend
+    if latest['SMA_20'] > latest['SMA_50']:
+        signals.append(('MA_Trend', 'UPTREND 🟢', 1))
+    else:
+        signals.append(('MA_Trend', 'DOWNTREND 🔴', -1))
+    
+    # Calculate overall score
+    total_score = sum(s[2] for s in signals)
+    
+    if total_score >= 2:
+        action = "BUY 🟢"
+        strength = "STRONG" if total_score == 3 else "MODERATE"
+    elif total_score <= -2:
+        action = "SELL 🔴"
+        strength = "STRONG" if total_score == -3 else "MODERATE"
+    else:
+        action = "HOLD ⚪"
+        strength = "NEUTRAL"
+    
+    return {
+        'action': action,
+        'strength': strength,
+        'score': total_score,
+        'signals': signals,
+        'rsi': latest['RSI'],
+        'macd': latest['MACD'],
+        'price': latest['Close']
+    }
