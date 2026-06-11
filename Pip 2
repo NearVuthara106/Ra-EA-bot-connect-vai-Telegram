@@ -1,0 +1,10 @@
+python -m pip install --upgrade pip
+python -m pip install streamlit
+python -m pip install pandas
+python -m pip install numpy
+python -m pip install yfinance
+python -m pip install plotly
+python -m pip install scikit-learn
+python -m pip install ta
+python -m pip install python-telegram-bot==20.7
+python -m pip install requests
