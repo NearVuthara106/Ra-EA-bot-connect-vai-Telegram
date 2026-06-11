@@ -1,0 +1,5 @@
+RaSoda/
+├── main.py
+├── ai_model.py
+├── data_fetcher.py
+└── requirements.txt
