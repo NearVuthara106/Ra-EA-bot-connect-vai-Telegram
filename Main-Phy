@@ -1,0 +1,264 @@
+import streamlit as st
+import pandas as pd
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
+from datetime import datetime
+import time
+
+# Import our modules
+from data_fetcher import get_live_xauusd, get_trading_signal, calculate_technical_indicators, get_current_price
+from ai_model import ra_soda_ai
+
+# Page configuration
+st.set_page_config(
+    page_title="RaSoda - AI XAUUSD Trading System",
+    page_icon="🥤",
+    layout="wide"
+)
+
+# Custom CSS for better look
+st.markdown("""
+<style>
+    .main-title {
+        font-size: 48px;
+        font-weight: bold;
+        background: linear-gradient(90deg, #FFD700, #FFA500);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        text-align: center;
+    }
+    .signal-buy {
+        background-color: #00ff00;
+        color: black;
+        padding: 20px;
+        border-radius: 10px;
+        text-align: center;
+        font-weight: bold;
+    }
+    .signal-sell {
+        background-color: #ff0000;
+        color: white;
+        padding: 20px;
+        border-radius: 10px;
+        text-align: center;
+        font-weight: bold;
+    }
+    .signal-hold {
+        background-color: #ffa500;
+        color: black;
+        padding: 20px;
+        border-radius: 10px;
+        text-align: center;
+        font-weight: bold;
+    }
+</style>
+""", unsafe_allow_html=True)
+
+# Title
+st.markdown('<h1 class="main-title">🥤 RaSoda AI Trading System</h1>', unsafe_allow_html=True)
+st.markdown('<p style="text-align: center;">XAUUSD (Gold) | AI-Powered Real-Time Analysis</p>', unsafe_allow_html=True)
+
+# Sidebar
+with st.sidebar:
+    st.header("⚙️ Settings")
+    
+    interval = st.selectbox(
+        "Timeframe",
+        ["1m", "5m", "15m", "30m", "1h"],
+        index=1
+    )
+    
+    period = st.selectbox(
+        "Data Period",
+        ["1d", "5d", "1mo", "3mo"],
+        index=2
+    )
+    
+    auto_refresh = st.checkbox("Auto Refresh (every 60s)", value=True)
+    
+    st.markdown("---")
+    st.markdown("### 🧠 How RaSoda AI Works")
+    st.markdown("""
+    1. **Real-time Data** - Live XAUUSD prices
+    2. **Technical Analysis** - RSI, MACD, MA
+    3. **Machine Learning** - Random Forest predicts direction
+    4. **Combined Signal** - AI + Indicators = Trade Decision
+    """)
+    
+    st.markdown("---")
+    st.markdown("⚠️ **Disclaimer**: Trading involves risk. This is for educational purposes.")
+
+# Main content area
+col1, col2, col3, col4 = st.columns(4)
+
+# Price display placeholder
+price_placeholder = col1.empty()
+change_placeholder = col2.empty()
+signal_placeholder = col3.empty()
+confidence_placeholder = col4.empty()
+
+# Charts placeholder
+chart_placeholder = st.empty()
+signals_placeholder = st.empty()
+
+# Session state for AI training
+if 'ai_trained' not in st.session_state:
+    st.session_state.ai_trained = False
+
+# Main loop
+def update_dashboard():
+    # Fetch data
+    data = get_live_xauusd(period=period, interval=interval)
+    
+    if data.empty:
+        st.error("⚠️ Failed to fetch data. Check your internet connection.")
+        return
+    
+    # Get current price
+    current_price = data['Close'].iloc[-1]
+    prev_price = data['Close'].iloc[-2] if len(data) > 1 else current_price
+    price_change = current_price - prev_price
+    price_change_pct = (price_change / prev_price) * 100
+    
+    # Train AI if not trained and have enough data
+    if not st.session_state.ai_trained and len(data) >= 100:
+        with st.spinner("🤖 Training RaSoda AI on historical data..."):
+            success = ra_soda_ai.train(data)
+            if success:
+                st.session_state.ai_trained = True
+                st.success("✅ RaSoda AI is now active!")
+                st.rerun()
+    
+    # Get AI prediction
+    if st.session_state.ai_trained:
+        ai_prediction = ra_soda_ai.predict(data)
+    else:
+        ai_prediction = {"signal": "LOADING...", "confidence": 0, "direction": "🤖 Training AI... Please wait"}
+    
+    # Get technical signal
+    tech_signal = get_trading_signal(data)
+    
+    # Update price cards
+    price_placeholder.metric(
+        label="💰 XAUUSD Price",
+        value=f"${current_price:.2f}",
+        delta=f"{price_change_pct:.2f}%"
+    )
+    
+    # Combined signal
+    if tech_signal['action'] == "BUY 🟢" and "BUY" in ai_prediction['signal']:
+        final_signal = "🚀 STRONG BUY"
+        signal_color = "🟢"
+    elif tech_signal['action'] == "SELL 🔴" and "SELL" in ai_prediction['signal']:
+        final_signal = "⚠️ STRONG SELL"
+        signal_color = "🔴"
+    else:
+        final_signal = tech_signal['action']
+        signal_color = "🟡" if "HOLD" in final_signal else ("🟢" if "BUY" in final_signal else "🔴")
+    
+    signal_placeholder.metric(
+        label=f"{signal_color} Trading Signal",
+        value=final_signal,
+        delta=f"Strength: {tech_signal['strength']}"
+    )
+    
+    confidence_placeholder.metric(
+        label="🧠 AI Confidence",
+        value=f"{ai_prediction['confidence']:.1f}%",
+        delta=ai_prediction['direction']
+    )
+    
+    # Create candlestick chart
+    fig = make_subplots(
+        rows=3, cols=1,
+        shared_xaxes=True,
+        vertical_spacing=0.05,
+        row_heights=[0.6, 0.2, 0.2],
+        subplot_titles=("XAUUSD Price", "RSI (14)", "MACD")
+    )
+    
+    # Candlestick chart
+    fig.add_trace(
+        go.Candlestick(
+            x=data.index,
+            open=data['Open'],
+            high=data['High'],
+            low=data['Low'],
+            close=data['Close'],
+            name="XAUUSD"
+        ),
+        row=1, col=1
+    )
+    
+    # Add moving averages
+    indicators = calculate_technical_indicators(data)
+    fig.add_trace(go.Scatter(x=data.index, y=indicators['SMA_20'], name="SMA 20", line=dict(color="orange")), row=1, col=1)
+    fig.add_trace(go.Scatter(x=data.index, y=indicators['SMA_50'], name="SMA 50", line=dict(color="blue")), row=1, col=1)
+    
+    # RSI
+    fig.add_trace(go.Scatter(x=data.index, y=indicators['RSI'], name="RSI", line=dict(color="purple")), row=2, col=1)
+    fig.add_hline(y=70, line_dash="dash", line_color="red", row=2, col=1)
+    fig.add_hline(y=30, line_dash="dash", line_color="green", row=2, col=1)
+    
+    # MACD
+    fig.add_trace(go.Bar(x=data.index, y=indicators['MACD_Histogram'], name="MACD Histogram", marker_color="gray"), row=3, col=1)
+    fig.add_trace(go.Scatter(x=data.index, y=indicators['MACD'], name="MACD", line=dict(color="blue")), row=3, col=1)
+    fig.add_trace(go.Scatter(x=data.index, y=indicators['MACD_Signal'], name="Signal", line=dict(color="red")), row=3, col=1)
+    
+    fig.update_layout(
+        title="📈 RaSoda Real-Time Analysis",
+        xaxis_title="Time",
+        height=800,
+        template="plotly_dark"
+    )
+    
+    fig.update_xaxes(rangeslider_visible=False)
+    
+    chart_placeholder.plotly_chart(fig, use_container_width=True)
+    
+    # Display technical signals
+    with signals_placeholder.container():
+        st.markdown("### 📊 Technical Indicators Summary")
+        
+        cols = st.columns(3)
+        for i, (indicator, value, _) in enumerate(tech_signal['signals']):
+            cols[i % 3].metric(
+                label=indicator,
+                value=value
+            )
+        
+        col1, col2 = st.columns(2)
+        with col1:
+            st.metric("RSI Value", f"{tech_signal['rsi']:.1f}")
+        with col2:
+            st.metric("MACD Value", f"{tech_signal['macd']:.4f}")
+
+# Initial update
+update_dashboard()
+
+# Auto-refresh logic
+if auto_refresh:
+    wait_time = st.number_input("Refresh interval (seconds)", min_value=10, max_value=300, value=60)
+    st.info(f"🔄 Auto-refreshing every {wait_time} seconds")
+    
+    # Create placeholder for countdown
+    countdown_placeholder = st.empty()
+    
+    for remaining in range(wait_time, 0, -1):
+        countdown_placeholder.info(f"⏳ Next update in {remaining} seconds...")
+        time.sleep(1)
+    
+    st.rerun()
+else:
+    if st.button("🔄 Refresh Now"):
+        st.rerun()
+
+# Footer
+st.markdown("---")
+st.markdown("""
+<div style="text-align: center; color: gray;">
+    <p>🥤 RaSoda AI Trading System | Built with Python, Streamlit, and Machine Learning</p>
+    <p>Data Source: Yahoo Finance (Gold Futures GC=F)</p>
+    <p><small>⚠️ This is not financial advice. Always do your own research before trading.</small></p>
+</div>
+""", unsafe_allow_html=True)
